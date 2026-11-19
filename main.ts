@@ -1,72 +1,48 @@
-// gta6-meme-x-01 entry (Node 22, standard library only).
+// Round 2 entry validator for gta6-meme-x-01.
 //
-// The entry is the X post itself: a GTA 6 meme posted from a public account
-// with make.fun (a link or written out) and/or a tag of @makefunai and the
-// entrant's play code in its text. POST.json names that post, and this program
-// hands it to the gate: it reads POST.json, checks the url really is an X
-// status link, and writes it to /output/POST.json, where the house reads it
-// and fetches the post from X (its first picture and its text) for the judge.
-// Nothing this program writes about the post is judged.
-//
-// The POST.json the kit starter ships holds a placeholder address, so the gate
-// refuses it as it stands (valid 0). The post's real address goes in before
-// submitting.
-//
-// Outside the grader's container, MAKEFUN_BOT_DIR and MAKEFUN_OUTPUT_DIR
-// stand in for /bot and /output:
-//   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
+// Reads POST.json, checks the entry post URL is a real X status URL
+// posted by @KazellaZeniaHQ, canonicalises it (https, x.com host,
+// no query string or trailing junk) and prints it to stdout.
+// Exits non-zero with a message on stderr if anything is off.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from "node:fs";
 
-const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
-const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-
-// An X status address: https://x.com/<handle>/status/<digits>.
-// http is tolerated too, as is twitter.com (X still redirects it). A trailing
-// slash, query string (?s=… tracking from Share) or fragment are accepted
-// here and stripped when the address is canonicalised below.
-const POST_URL = /^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})\/status\/(\d+)(?:\/)?(?:[?#].*)?$/;
+const ACCOUNT = "KazellaZeniaHQ";
 
 function fail(message: string): never {
-  console.error(`gta6-meme-x-01: ${message}`);
+  console.error(`main.ts: ${message}`);
   process.exit(1);
 }
 
-mkdirSync(OUTPUT_DIR, { recursive: true });
+const raw = readFileSync(new URL("./POST.json", import.meta.url), "utf8");
 
-let raw: string;
+let parsed: unknown;
 try {
-  raw = readFileSync(join(BOT_DIR, 'POST.json'), 'utf8');
-} catch (err) {
-  fail(`POST.json could not be read from ${BOT_DIR}: ${(err as Error).message}`);
+  parsed = JSON.parse(raw);
+} catch {
+  fail("POST.json is not valid JSON");
 }
 
-let post: unknown;
+const url = (parsed as { url?: unknown }).url;
+if (typeof url !== "string" || url.length === 0) {
+  fail("POST.json has no string \"url\" field");
+}
+
+let u: URL;
 try {
-  post = JSON.parse(raw);
-} catch (err) {
-  fail(`POST.json is not valid JSON: ${(err as Error).message}`);
+  u = new URL(url);
+} catch {
+  fail(`not a valid URL: ${url}`);
 }
 
-const url = (post as { url?: unknown } | null)?.url;
-const match = typeof url === 'string' ? POST_URL.exec(url) : null;
-if (match === null) {
-  fail(
-    'POST.json must name the entry post as {"url": "https://x.com/<handle>/status/<id>"}; ' +
-      `got ${JSON.stringify(url)}. Replace the placeholder with the real post address before submitting.`,
-  );
+if (u.protocol !== "https:") fail(`URL must be https: ${url}`);
+if (u.hostname !== "x.com") fail(`URL must be on x.com: ${url}`);
+
+const match = u.pathname.match(/^\/([A-Za-z0-9_]+)\/status\/(\d+)\/?$/);
+if (!match) fail(`URL is not an X status URL: ${url}`);
+if (match[1] !== ACCOUNT) {
+  fail(`status must be posted by @${ACCOUNT}, got @${match[1]}`);
 }
 
-// Canonical form: x.com, no www, no query string or fragment, no trailing
-// slash — so the address handed to the gate is the same no matter how the
-// post link was copied (Share adds ?s=… and similar tracking).
-const canonicalUrl = `https://x.com/${match[1]}/status/${match[2]}`;
-
-try {
-  writeFileSync(join(OUTPUT_DIR, 'POST.json'), JSON.stringify({ url: canonicalUrl }) + '\n', 'utf8');
-} catch (err) {
-  fail(`POST.json could not be written to ${OUTPUT_DIR}: ${(err as Error).message}`);
-}
-
-console.log(`post: ${canonicalUrl}`);
+const canonical = `https://x.com/${match[1]}/status/${match[2]}`;
+console.log(canonical);
