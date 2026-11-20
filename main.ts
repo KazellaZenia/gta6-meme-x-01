@@ -1,48 +1,63 @@
-// Round 2 entry validator for gta6-meme-x-01.
+// Round 3 entry program for gta6-meme-x-01.
 //
-// Reads POST.json, checks the entry post URL is a real X status URL
-// posted by @KazellaZeniaHQ, canonicalises it (https, x.com host,
-// no query string or trailing junk) and prints it to stdout.
-// Exits non-zero with a message on stderr if anything is off.
+// The entry itself is a post on X, so this program's only job is to
+// carry that post's address from POST.json into the output directory:
+// it reads the file, makes sure it names a real X status posted by
+// @KazellaZeniaHQ, writes the canonical form to <output>/POST.json
+// and prints it.
+//
+// Run it from the repo root, e.g.:
+//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ACCOUNT = "KazellaZeniaHQ";
+const HANDLE = "KazellaZeniaHQ";
 
-function fail(message: string): never {
+function die(message: string): never {
   console.error(`main.ts: ${message}`);
   process.exit(1);
 }
 
-const raw = readFileSync(new URL("./POST.json", import.meta.url), "utf8");
+const here = dirname(fileURLToPath(import.meta.url));
+const postPath = join(here, "POST.json");
 
-let parsed: unknown;
+let doc: unknown;
 try {
-  parsed = JSON.parse(raw);
+  doc = JSON.parse(readFileSync(postPath, "utf8"));
 } catch {
-  fail("POST.json is not valid JSON");
+  die("POST.json is not valid JSON");
 }
 
-const url = (parsed as { url?: unknown }).url;
-if (typeof url !== "string" || url.length === 0) {
-  fail("POST.json has no string \"url\" field");
+const rawUrl = (doc as { url?: unknown }).url;
+if (typeof rawUrl !== "string" || rawUrl.length === 0) {
+  die('POST.json has no string "url" field');
 }
 
-let u: URL;
+let parsed: URL;
 try {
-  u = new URL(url);
+  parsed = new URL(rawUrl);
 } catch {
-  fail(`not a valid URL: ${url}`);
+  die(`not a valid URL: ${rawUrl}`);
 }
 
-if (u.protocol !== "https:") fail(`URL must be https: ${url}`);
-if (u.hostname !== "x.com") fail(`URL must be on x.com: ${url}`);
+if (parsed.protocol !== "https:") die(`URL must use https: ${rawUrl}`);
+if (parsed.hostname !== "x.com") die(`URL must be on x.com: ${rawUrl}`);
 
-const match = u.pathname.match(/^\/([A-Za-z0-9_]+)\/status\/(\d+)\/?$/);
-if (!match) fail(`URL is not an X status URL: ${url}`);
-if (match[1] !== ACCOUNT) {
-  fail(`status must be posted by @${ACCOUNT}, got @${match[1]}`);
+const parts = parsed.pathname.match(/^\/([A-Za-z0-9_]+)\/status\/(\d+)\/?$/);
+if (!parts) die(`URL is not an X status URL: ${rawUrl}`);
+if (parts[1] !== HANDLE) {
+  die(`status must be posted by @${HANDLE}, got @${parts[1]}`);
 }
 
-const canonical = `https://x.com/${match[1]}/status/${match[2]}`;
+const canonical = `https://x.com/${parts[1]}/status/${parts[2]}`;
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? join(here, "out");
+mkdirSync(outDir, { recursive: true });
+const outPath = join(outDir, "POST.json");
+writeFileSync(outPath, `${JSON.stringify({ url: canonical })}\n`);
+// Re-read what was written: the copy must round-trip exactly, so a
+// half-written file can never pass as a good entry.
+const written = JSON.parse(readFileSync(outPath, "utf8")) as { url?: unknown };
+if (written.url !== canonical) die(`wrote ${outPath} but it does not hold ${canonical}`);
 console.log(canonical);
